@@ -2,7 +2,7 @@
 
 A Python package for downloading, cleaning, and aggregating meteorological data from NASA's [MERRA-2](https://gmao.gsfc.nasa.gov/reanalysis/MERRA-2/) database.
 
-Adapted from the [Open Power System Data](https://github.com/Open-Power-System-Data/weather_data/blob/master/download_merra2.ipynb) notebook. Edited and maintained by [Anemona](https://anemona.io).
+Originally developed by [Jan Urbansky](https://github.com/emilylaiken/merradownload), adapted from the [Open Power System Data](https://github.com/Open-Power-System-Data/weather_data/blob/master/download_merra2.ipynb) notebook. Edited and maintained by [Anemona](https://anemona.io).
 
 ## Installation
 
