@@ -3,8 +3,11 @@ __author__ = "Jan Urbansky"
 # TODO: Change and describe structure of the links that have to be provided.
 # TODO: Proper readme with examples.
 
-from multiprocessing.dummy import Pool as Threadpool
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from tqdm import tqdm
 import logging
 import yaml
 import os
@@ -76,7 +79,7 @@ class DownloadManager(object):
 
     def read_credentials_from_yaml(self, file_path_to_yaml):
         with open(file_path_to_yaml, 'r') as f:
-            credentials = yaml.load(f)
+            credentials = yaml.safe_load(f)
             log.debug('Credentials: ' + str(credentials))
             self.set_username_and_password(credentials['username'], credentials['password'])
 
@@ -90,18 +93,25 @@ class DownloadManager(object):
         """
         query = url_item
         file_path = os.path.join(self.download_path, self.get_filename(query))
+        if os.path.exists(file_path):
+            log.debug('Skipping already-downloaded file: %s', file_path)
+            return
         self.__download_and_save_file(query, file_path)
 
     def start_download(self, nr_of_threads=4):
         if self._authenticated_session is None:
-            self._authenticated_session = self.__create_authenticated_sesseion()
-        # Create the download folder.
+            self._authenticated_session = self.__create_authenticated_session()
         os.makedirs(self.download_path, exist_ok=True)
-        # p = multiprocessing.Pool(nr_of_processes)
-        p = Threadpool(nr_of_threads)
-        p.map(self._mp_download_wrapper, self.download_urls)
-        p.close()
-        p.join()
+        with ThreadPoolExecutor(max_workers=nr_of_threads) as executor:
+            futures = {executor.submit(self._mp_download_wrapper, url): url for url in self.download_urls}
+            with tqdm(total=len(self.download_urls), unit='file') as pbar:
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        log.error('Failed to download %s: %s', futures[future], e)
+                    finally:
+                        pbar.update(1)
 
     @staticmethod
     def get_filename(url):
@@ -122,16 +132,21 @@ class DownloadManager(object):
 
     def __download_and_save_file(self, url, file_path):
         r = self._authenticated_session.get(url, stream=True)
+        r.raise_for_status()
         with open(file_path, 'wb') as f:
             for chunk in r.iter_content(chunk_size=1024):
                 if chunk:
                     f.write(chunk)
         return r.status_code
 
-    def __create_authenticated_sesseion(self):
+    def __create_authenticated_session(self):
         s = requests.Session()
         s.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/40.0.2214.85 Safari/537.36'}
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
+        retry = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retry)
+        s.mount('https://', adapter)
+        s.mount('http://', adapter)
         s.auth = (self.__username, self.__password)
         s.cookies = self.__authorize_cookies_with_urllib()
 
@@ -195,7 +210,7 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging.DEBUG, handlers=[logging.StreamHandler()])
     dl = DownloadManager()
-    dl.download_path = 'downlaod123'
+    dl.download_path = 'download'
     dl.read_credentials_from_yaml((os.path.join(os.path.dirname(os.path.realpath(__file__)), 'authentication.yaml')))
     dl.download_urls = link
     dl.start_download()
